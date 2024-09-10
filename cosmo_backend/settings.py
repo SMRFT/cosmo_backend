@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'cosmetology',
+    'sslserver',
 ]
 
 REST_FRAMEWORK = {
