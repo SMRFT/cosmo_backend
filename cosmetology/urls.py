@@ -12,6 +12,7 @@ urlpatterns = [
     path('check_medicine_status/', check_medicine_status, name='check_medicine_status'),
     path('Patients_data/', Patients_data, name='Patients_data'),
     path('patients/', PatientView, name='PatientView'),
+    path('patients/<str:patientUID>/', PatientView, name='patient-detail'),
     path('Appointmentpost/', Appointmentpost, name='Appointmentpost'),
     path('AppointmentView/', AppointmentView, name='AppointmentView'),
     path('summary/post/', SummaryDetailCreate, name='summary-create'),
