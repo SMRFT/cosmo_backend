@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'cosmetology',
     'sslserver',
+    'django_extensions',
 ]
 
 REST_FRAMEWORK = {
