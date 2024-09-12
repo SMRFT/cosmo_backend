@@ -195,10 +195,17 @@ def Patients_data(request):
 
 from .models import Patient
 @api_view(['GET'])
-def PatientView(request):
-    if request.method == 'GET':
-        medicines = Patient.objects.all()
-        serializer = PatientSerializer(medicines, many=True)
+def PatientView(request, patientUID=None):
+    if patientUID:
+        try:
+            patient = Patient.objects.get(patientUID=patientUID)
+            serializer = PatientSerializer(patient)
+            return Response(serializer.data)
+        except Patient.DoesNotExist:
+            return Response({'error': 'Patient not found'}, status=404)
+    else:
+        patients = Patient.objects.all()
+        serializer = PatientSerializer(patients, many=True)
         return Response(serializer.data)
     
 
@@ -352,21 +359,20 @@ def get_summary_by_interval(request, interval):
 
 
 from .models import BillingData
-
 @api_view(['GET'])
 def get_billing_by_interval(request, interval):
     date_str = request.GET.get('appointmentDate')
-    if date_str is None:
+    if not date_str:
         return JsonResponse({'error': 'Date parameter is missing'}, status=400)
-    
+
     try:
-        selected_date = datetime.strptime(date_str, '%Y-%m-%d')
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
-        return JsonResponse({'error': 'Invalid date format. Expected YYYY-MM-DD'}, status=400)
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
 
     if interval == 'day':
         start_date = selected_date
-        end_date = selected_date
+        end_date = selected_date  # Start and end on the same day
     elif interval == 'week':
         start_date = selected_date
         end_date = start_date + timedelta(days=6)
@@ -378,10 +384,43 @@ def get_billing_by_interval(request, interval):
     else:
         return JsonResponse({'error': 'Invalid interval'}, status=400)
 
+    # Filter records from start_date to end_date
     billing = BillingData.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
     serializer = BillingDataSerializer(billing, many=True)
-    return JsonResponse(serializer.data, safe=False)
+    return JsonResponse({'billing_data': serializer.data}, safe=False)
 
+
+from .models import ProcedureBill
+from .serializers import ProcedureBillSerializer
+@api_view(['GET'])
+@csrf_exempt
+def get_procedurebilling_by_interval(request, interval):
+    date_str = request.GET.get('appointmentDate')
+    if not date_str:
+        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
+
+    try:
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    if interval == 'day':
+        start_date = selected_date
+        end_date = selected_date  # Start and end on the same day
+    elif interval == 'week':
+        start_date = selected_date
+        end_date = start_date + timedelta(days=6)
+    elif interval == 'month':
+        start_date = selected_date.replace(day=1)  # First day of the month
+        # Calculate the last day of the month
+        next_month = start_date.replace(day=28) + timedelta(days=4)
+        end_date = next_month.replace(day=1) - timedelta(days=1)
+    else:
+        return JsonResponse({'error': 'Invalid interval'}, status=400)
+
+    procedurebilling = ProcedureBill.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
+    serializer = ProcedureBillSerializer(procedurebilling, many=True)
+    return JsonResponse(serializer.data, safe=False)
 
 @api_view(['GET'])
 @csrf_exempt
@@ -616,33 +655,7 @@ def delete_billing_data(request):
             return JsonResponse({'message': str(e)}, status=400)
     return JsonResponse({'message': 'Method not allowed'}, status=405)
 
-from .models import ProcedureBill
-from .serializers import ProcedureBillSerializer
-@api_view(['GET'])
-@csrf_exempt
-def get_procedurebilling_by_interval(request, interval):
-    date_str = request.GET.get('appointmentDate')
-    try:
-        selected_date = datetime.strptime(date_str, '%Y-%m-%d')
-    except ValueError:
-        return JsonResponse({'error': 'Invalid date format'}, status=400)
 
-    if interval == 'day':
-        start_date = selected_date
-        end_date = selected_date
-    elif interval == 'week':
-        start_date = selected_date - timedelta(days=selected_date.weekday())
-        end_date = start_date + timedelta(days=6)
-    elif interval == 'month':
-        start_date = selected_date.replace(day=1)
-        next_month = start_date.replace(month=start_date.month % 12 + 1, day=1)
-        end_date = next_month - timedelta(days=1)
-    else:
-        return JsonResponse({'error': 'Invalid interval'}, status=400)
-
-    procedurebilling = ProcedureBill.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
-    serializer = ProcedureBillSerializer(procedurebilling, many=True)
-    return JsonResponse(serializer.data, safe=False)
 
 
 @require_GET
