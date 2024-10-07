@@ -844,3 +844,57 @@ def get_file(request):
     else:
         # Return a 404 error if the file is not found
         return HttpResponse(status=404)
+client = MongoClient('mongodb+srv://smrftcosmo:smrft%402024@cluster0.lctyiq9.mongodb.net/your_database_name?retryWrites=true&w=majority')
+db = client['cosmetology']
+fs = GridFS(db)
+
+@csrf_exempt
+def upload_pdf(request):
+    if request.method == 'POST':
+        patient_name = request.POST.get('patient_name')
+        if 'pdf_files' in request.FILES:
+            pdf_files = request.FILES.getlist('pdf_files')
+            for index, pdf_file in enumerate(pdf_files):
+                pdf_filename = f'{patient_name}_{index}.pdf'
+                pdf_id = fs.put(pdf_file, filename=pdf_filename)
+                # You can store additional details in a separate collection if needed:
+                # db.fs.files.insert_one({
+                #     'pdf_id': str(pdf_id),
+                #     'patient_name': patient_name,
+                #     'file_name': pdf_filename,
+                # })
+            return HttpResponse('PDFs uploaded successfully')
+        return HttpResponseBadRequest('No PDF files provided')
+    return HttpResponseBadRequest('Invalid request method')
+
+
+@csrf_exempt
+def get_pdf_file(request):
+    """
+    View to retrieve a PDF file from MongoDB GridFS.
+    This view handles GET requests to retrieve a PDF file from MongoDB GridFS based on the provided filename.
+    Args:
+        request (HttpRequest): The HTTP request object containing the filename to retrieve.
+    Returns:
+        HttpResponse: An HTTP response containing the PDF file contents or a 404 error if the file is not found.
+    """
+    # Connect to MongoDB
+    client = MongoClient('mongodb+srv://smrftcosmo:smrft%402024@cluster0.lctyiq9.mongodb.net/your_database_name?retryWrites=true&w=majority')
+    db = client['cosmetology']
+    fs = GridFS(db)
+
+    # Get the filename from the request parameters
+    filename = request.GET.get('filename')
+
+    # Find the PDF file in MongoDB GridFS
+    file = fs.find_one({"filename": filename})
+
+    if file is not None:
+        # Return the PDF file contents as an HTTP response
+        response = HttpResponse(file.read())
+        response['Content-Type'] = 'application/pdf'
+        response['Content-Disposition'] = 'attachment; filename=%s' % file.filename
+        return response
+    else:
+        # Return a 404 error if the PDF file is not found
+        return HttpResponse(status=404)
