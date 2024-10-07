@@ -50,15 +50,16 @@ class Pharmacy(models.Model):
         return (expiry_date - timezone.now().date()) <= timedelta(days=10)
 
 class Patient(models.Model):
-    patientName = models.CharField(max_length=255)  # Mandatory
-    mobileNumber = models.CharField(max_length=11, primary_key=True)  # Mandatory
-    age = models.IntegerField()  # New field for age, replacing dateOfBirth
-    gender = models.CharField(max_length=10, blank=True, null=True)  # Optional
+    patientName = models.CharField(max_length=255)
+    mobileNumber = models.CharField(max_length=11, primary_key=True)
+    dateOfBirth = models.DateField()
+    gender = models.CharField(max_length=10)
     patientUID = models.CharField(max_length=10, unique=True, blank=True, editable=False)
-    email = models.EmailField(blank=True, null=True)  # Optional
-    language = models.CharField(max_length=10, blank=True, null=True)  # Optional
-    purposeOfVisit = models.CharField(max_length=500, blank=True, null=True)  # Optional
-    address = models.TextField(blank=True, null=True)  # Optional
+    email = models.EmailField()
+    bloodGroup = models.CharField(max_length=3)
+    language = models.CharField(max_length=10)
+    purposeOfVisit = models.CharField(max_length=500)
+    address = models.TextField()
 
     def save(self, *args, **kwargs):
         if not self.patientUID:
