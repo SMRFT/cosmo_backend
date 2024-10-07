@@ -50,16 +50,15 @@ class Pharmacy(models.Model):
         return (expiry_date - timezone.now().date()) <= timedelta(days=10)
 
 class Patient(models.Model):
-    patientName = models.CharField(max_length=255)
-    mobileNumber = models.CharField(max_length=11, primary_key=True)
-    dateOfBirth = models.DateField()
-    gender = models.CharField(max_length=10)
+    patientName = models.CharField(max_length=255)  # Mandatory
+    mobileNumber = models.CharField(max_length=11, primary_key=True)  # Mandatory
+    age = models.IntegerField()  # New field for age, replacing dateOfBirth
+    gender = models.CharField(max_length=10, blank=True, null=True)  # Optional
     patientUID = models.CharField(max_length=10, unique=True, blank=True, editable=False)
-    email = models.EmailField()
-    bloodGroup = models.CharField(max_length=3)
-    language = models.CharField(max_length=10)
-    purposeOfVisit = models.CharField(max_length=500)
-    address = models.TextField()
+    email = models.EmailField(blank=True, null=True)  # Optional
+    language = models.CharField(max_length=10, blank=True, null=True)  # Optional
+    purposeOfVisit = models.CharField(max_length=500, blank=True, null=True)  # Optional
+    address = models.TextField(blank=True, null=True)  # Optional
 
     def save(self, *args, **kwargs):
         if not self.patientUID:
@@ -87,24 +86,26 @@ class Appointment(models.Model):
 class SummaryDetail(models.Model):
     patientName = models.CharField(max_length=100)
     patientUID = models.CharField(max_length=100)
-    mobileNumber= models.CharField(max_length=100)
+    mobileNumber = models.CharField(max_length=100)
     diagnosis = models.TextField(blank=True)
-    complaints = models.TextField(blank=True)
+    complaints = models.JSONField(blank=True)
     findings = models.TextField(blank=True)
     prescription = models.TextField(blank=True)
     plans = models.TextField(blank=True)
     tests = models.TextField(blank=True)
-    vital= models.JSONField(blank=True)
+    vital = models.JSONField(blank=True)
     proceduresList = models.JSONField(blank=True)
-    nextVisit = models.TextField(blank=True)  # Assuming this is for next visit details
-    appointmentDate = models.CharField(max_length=500) # Automatically set the date when the object is created
-    time = models.CharField(max_length=8, blank=True)  # Custom field to store current time in HH:MM:SS format
+    nextVisit = models.TextField(blank=True)
+    appointmentDate = models.CharField(max_length=500)
+    time = models.CharField(max_length=8, blank=True)
+
     def save(self, *args, **kwargs):
         # Set current Indian Standard Time (IST)
         tz = timezone.get_current_timezone()
         current_time = timezone.localtime(timezone.now(), tz).strftime('%H:%M:%S')
         self.time = current_time
         super().save(*args, **kwargs)
+
     def __str__(self):
         return self.diagnosis
 
@@ -130,8 +131,11 @@ class BillingData(models.Model):
     patientName = models.CharField(max_length=100)
     appointmentDate = models.CharField(max_length=500)
     table_data = models.JSONField()
-    netAmount   = models.CharField(max_length=500)
-    discount= models.CharField(max_length=500)
+    netAmount = models.CharField(max_length=500)
+    discount = models.CharField(max_length=500)
+    paymentType = models.CharField(max_length=10, choices=[('Cash', 'Cash'), ('Card', 'Card')])
+    billNumber = models.CharField(max_length=50)
+
 
 class Diagnosis(models.Model):
     diagnosis= models.CharField(max_length=100)
@@ -149,10 +153,15 @@ class Procedure(models.Model):
     procedure= models.CharField(max_length=500) 
 
 class ProcedureBill(models.Model):
-    appointmentDate= models.CharField(max_length=255)
+    appointmentDate = models.CharField(max_length=255)
     patientName = models.CharField(max_length=255)
     patientUID = models.CharField(max_length=255)
     procedures = models.JSONField()
     procedureNetAmount = models.CharField(max_length=255)
     consumerNetAmount = models.CharField(max_length=255)
-    consumer  = models.JSONField()
+    consumer = models.JSONField()
+
+    # Add paymentType and billNumber for both consumer and procedure
+    PaymentType = models.CharField(max_length=10, choices=[('Cash', 'Cash'), ('Card', 'Card')])
+    consumerBillNumber = models.CharField(max_length=50)
+    procedureBillNumber = models.CharField(max_length=50)
