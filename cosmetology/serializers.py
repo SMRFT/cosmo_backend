@@ -1,125 +1,167 @@
-# forms.py
-from rest_framework import serializers
-from .models import Register
-from bson import ObjectId
-class ObjectIdField(serializers.Field):
-    def to_representation(self, value):
-        return str(value)
-    def to_internal_value(self, data):
-        return ObjectId(data)
+# models.py
+from django.utils import timezone
+from datetime import timedelta,datetime
+from dateutil.parser import parse
+from django.db import models
+
+
+class Register(models.Model):
+    id = models.CharField(max_length=500, primary_key=True)
+    name = models.CharField(max_length=500)
+    role = models.CharField(max_length=500)
+    email = models.EmailField(max_length=500, unique=True)
+    password = models.CharField(max_length=500)
+    confirmPassword = models.CharField(max_length=500)
+
+
+class Login(models.Model):
+    username = models.CharField(max_length=150)
+    password = models.CharField(max_length=120)
+
+class Pharmacy(models.Model):
+    medicine_name = models.CharField(max_length=255, unique=True)
+    company_name = models.CharField(max_length=255)
+    price = models.CharField(max_length=255)
+    CGST_percentage = models.CharField(max_length=200)
+    CGST_value = models.CharField(max_length=200)
+    SGST_percentage = models.CharField(max_length=200)
+    SGST_value = models.CharField(max_length=200)
+    new_stock = models.IntegerField()
+    old_stock = models.IntegerField(null=True, blank=True)
+    received_date = models.DateField()
+    expiry_date = models.DateField()
+    batch_number = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.medicine_name
+
+    def is_quantity_low(self):
+        # Ensure old_stock is not None before comparison
+        if self.old_stock is None:
+            return False
+        return self.old_stock <= 15
+
+    def is_expiry_near(self):
+        if isinstance(self.expiry_date, str):
+            expiry_date = parse(self.expiry_date).date()
+        else:
+            expiry_date = self.expiry_date
+
+        return (expiry_date - timezone.now().date()) <= timedelta(days=10)
+
+class Patient(models.Model):
+    patientName = models.CharField(max_length=255)  # Mandatory
+    mobileNumber = models.CharField(max_length=11, primary_key=True)  # Mandatory
+    age = models.IntegerField()  # New field for age, replacing dateOfBirth
+    gender = models.CharField(max_length=10, blank=True, null=True)  # Optional
+    patientUID = models.CharField(max_length=10, unique=True, blank=True, editable=False)
+    email = models.EmailField(blank=True, null=True)  # Optional
+    language = models.CharField(max_length=10, blank=True, null=True)  # Optional
+    purposeOfVisit = models.CharField(max_length=500, blank=True, null=True)  # Optional
+    address = models.TextField(blank=True, null=True)  # Optional
+
+    def save(self, *args, **kwargs):
+        if not self.patientUID:
+            count = Patient.objects.count() + 1
+            self.patientUID = f'SHC0{count:02}'  # Padded to 3 digits (e.g., SHC0001, SHC0002, etc.)
+        super(Patient, self).save(*args, **kwargs)
+
+    def __str__(self):
+        return self.patientName
     
-class RegisterSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Register
-        fields = '__all__'
 
-    def validate(self, data):
-        if data['password'] != data['confirmPassword']:
-            raise serializers.ValidationError("Passwords do not match.")
-        return data
-    
-    
-from .models import Login
-class LoginSerializer(serializers.ModelSerializer):
-    class Meta:
-        model =   Login
-        fields = '__all__'
+class Appointment(models.Model):
+    patientUID = models.CharField(max_length=10)
+    patientName = models.CharField(max_length=255)
+    mobileNumber = models.CharField(max_length=11)
+    appointmentTime = models.CharField(max_length=1000)
+    appointmentDate = models.DateField()
+    purposeOfVisit = models.CharField(max_length=500)
+    gender = models.CharField(max_length=10)
+
+    def __str__(self):
+        return self.patientUID
 
 
-from .models import Pharmacy
-class PharmacySerializer(serializers.ModelSerializer):
-    id = ObjectIdField(read_only=True)
-    class Meta:
-        model = Pharmacy
-        fields = '__all__'
+class SummaryDetail(models.Model):
+    patientName = models.CharField(max_length=100)
+    patientUID = models.CharField(max_length=100)
+    mobileNumber = models.CharField(max_length=100)
+    diagnosis = models.TextField(blank=True)
+    complaints = models.JSONField(blank=True)
+    findings = models.TextField(blank=True)
+    prescription = models.TextField(blank=True)
+    plans = models.TextField(blank=True)
+    tests = models.TextField(blank=True)
+    vital = models.JSONField(blank=True)
+    proceduresList = models.JSONField(blank=True)
+    nextVisit = models.TextField(blank=True)
+    appointmentDate = models.CharField(max_length=500)
+    time = models.CharField(max_length=8, blank=True)
 
-class PharmacyStockUpdateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Pharmacy
-        fields = ['medicine_name', 'old_stock']  # Include only necessary fields
+    def save(self, *args, **kwargs):
+        # Set current Indian Standard Time (IST)
+        tz = timezone.get_current_timezone()
+        current_time = timezone.localtime(timezone.now(), tz).strftime('%H:%M:%S')
+        self.time = current_time
+        super().save(*args, **kwargs)
 
+    def __str__(self):
+        return self.diagnosis
 
-from .models import Patient
-class PatientSerializer(serializers.ModelSerializer):
-    id = ObjectIdField(read_only=True)
-    class Meta:
-        model = Patient
-        fields = '__all__'
+class Visit(models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+    visit_date = models.DateTimeField(auto_now_add=True)
 
+class Vital(models.Model):
+    patientUID = models.CharField(max_length=10)
+    patientName = models.CharField(max_length=100)
+    mobileNumber = models.CharField(max_length=15)
+    height = models.CharField(max_length=10)
+    weight = models.CharField(max_length=10)
+    pulseRate = models.CharField(max_length=10)
+    bloodPressure = models.CharField(max_length=10)
+    recorded_at = models.DateTimeField(auto_now_add=True)
 
-from .models import Appointment
-class AppointmentSerializer(serializers.ModelSerializer):
-    id = ObjectIdField(read_only=True)
-    class Meta:
-        model = Appointment
-        fields = '__all__'
+    def __str__(self):
+        return f"{self.patientUID} - {self.recorded_at}"
 
-
-from .models import SummaryDetail
-class SummaryDetailSerializer(serializers.ModelSerializer):
-    id = ObjectIdField(read_only=True)
-    class Meta:
-        model = SummaryDetail
-        fields = '__all__'
-
-
-from .models import Visit
-class VisitSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Visit
-        fields = '__all__'
-
-
-from .models import Vital
-class VitalSerializer(serializers.ModelSerializer):
-    id = ObjectIdField(read_only=True)
-    class Meta:
-        model = Vital
-        fields = '__all__'
-
-
-from .models import BillingData
-class BillingDataSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = BillingData
-        fields = '__all__'
+class BillingData(models.Model):
+    patientUID = models.CharField(max_length=10)
+    patientName = models.CharField(max_length=100)
+    appointmentDate = models.CharField(max_length=500)
+    table_data = models.JSONField()
+    netAmount = models.CharField(max_length=500)
+    discount = models.CharField(max_length=500)
+    paymentType = models.CharField(max_length=10, choices=[('Cash', 'Cash'), ('Card', 'Card')])
+    billNumber = models.CharField(max_length=50)
 
 
-from .models import Diagnosis,Complaints,Findings,Tests,Procedure
-class DiagnosisSerializer(serializers.ModelSerializer):
-     id = ObjectIdField(read_only=True)
-     class Meta:
-        model = Diagnosis
-        fields = '__all__'
+class Diagnosis(models.Model):
+    diagnosis= models.CharField(max_length=100)
 
-class ComplaintsSerializer(serializers.ModelSerializer):
-     id = ObjectIdField(read_only=True)
-     class Meta:
-        model = Complaints
-        fields = '__all__'
+class Complaints(models.Model):
+    complaints= models.CharField(max_length=100)
 
-class FindingsSerializer(serializers.ModelSerializer):
-     id = ObjectIdField(read_only=True)
-     class Meta:
-        model = Findings
-        fields = '__all__'
+class Findings(models.Model):
+    findings= models.CharField(max_length=100)
 
-class TestsSerializer(serializers.ModelSerializer):
-     id = ObjectIdField(read_only=True)
-     class Meta:
-        model = Tests
-        fields = '__all__'
+class Tests(models.Model):
+    test= models.CharField(max_length=500)
 
-class ProcedureSerializer(serializers.ModelSerializer):
-     id = ObjectIdField(read_only=True)
-     class Meta:
-        model = Procedure
-        fields = '__all__'
+class Procedure(models.Model):
+    procedure= models.CharField(max_length=500) 
 
+class ProcedureBill(models.Model):
+    appointmentDate = models.CharField(max_length=255)
+    patientName = models.CharField(max_length=255)
+    patientUID = models.CharField(max_length=255)
+    procedures = models.JSONField()
+    procedureNetAmount = models.CharField(max_length=255)
+    consumerNetAmount = models.CharField(max_length=255)
+    consumer = models.JSONField()
 
-from .models import ProcedureBill
-class ProcedureBillSerializer(serializers.ModelSerializer):
-     id = ObjectIdField(read_only=True)
-     class Meta:
-        model = ProcedureBill
-        fields = '__all__'
+    # Add paymentType and billNumber for both consumer and procedure
+    PaymentType = models.CharField(max_length=10, choices=[('Cash', 'Cash'), ('Card', 'Card')])
+    consumerBillNumber = models.CharField(max_length=50)
+    procedureBillNumber = models.CharField(max_length=50)
