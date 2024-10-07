@@ -195,17 +195,10 @@ def Patients_data(request):
 
 from .models import Patient
 @api_view(['GET'])
-def PatientView(request, patientUID=None):
-    if patientUID:
-        try:
-            patient = Patient.objects.get(patientUID=patientUID)
-            serializer = PatientSerializer(patient)
-            return Response(serializer.data)
-        except Patient.DoesNotExist:
-            return Response({'error': 'Patient not found'}, status=404)
-    else:
-        patients = Patient.objects.all()
-        serializer = PatientSerializer(patients, many=True)
+def PatientView(request):
+    if request.method == 'GET':
+        medicines = Patient.objects.all()
+        serializer = PatientSerializer(medicines, many=True)
         return Response(serializer.data)
     
 
@@ -329,98 +322,6 @@ def get_medicine_price(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-
-@api_view(['GET'])
-@csrf_exempt
-def get_summary_by_interval(request, interval):
-    date_str = request.GET.get('appointmentDate')
-    if not date_str:
-        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
-
-    try:
-        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return JsonResponse({'error': 'Invalid date format'}, status=400)
-
-    if interval == 'day':
-        start_date = selected_date
-        end_date = selected_date
-    elif interval == 'month':
-        start_date = selected_date.replace(day=1)
-        # Determine the end of the month
-        next_month = (start_date + timedelta(days=31)).replace(day=1)
-        end_date = next_month - timedelta(days=1)
-    else:
-        return JsonResponse({'error': 'Invalid interval'}, status=400)
-
-    summaries = SummaryDetail.objects.filter(appointmentDate__range=(start_date, end_date))
-    serializer = SummaryDetailSerializer(summaries, many=True)
-    return JsonResponse(serializer.data, safe=False)
-
-
-from .models import BillingData
-@api_view(['GET'])
-def get_billing_by_interval(request, interval):
-    date_str = request.GET.get('appointmentDate')
-    if not date_str:
-        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
-
-    try:
-        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return JsonResponse({'error': 'Invalid date format'}, status=400)
-
-    if interval == 'day':
-        start_date = selected_date
-        end_date = selected_date  # Start and end on the same day
-    elif interval == 'week':
-        start_date = selected_date
-        end_date = start_date + timedelta(days=6)
-    elif interval == 'month':
-        start_date = selected_date.replace(day=1)  # First day of the month
-        # Calculate the last day of the month
-        next_month = start_date.replace(day=28) + timedelta(days=4)
-        end_date = next_month.replace(day=1) - timedelta(days=1)
-    else:
-        return JsonResponse({'error': 'Invalid interval'}, status=400)
-
-    # Filter records from start_date to end_date
-    billing = BillingData.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
-    serializer = BillingDataSerializer(billing, many=True)
-    return JsonResponse({'billing_data': serializer.data}, safe=False)
-
-
-from .models import ProcedureBill
-from .serializers import ProcedureBillSerializer
-@api_view(['GET'])
-@csrf_exempt
-def get_procedurebilling_by_interval(request, interval):
-    date_str = request.GET.get('appointmentDate')
-    if not date_str:
-        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
-
-    try:
-        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return JsonResponse({'error': 'Invalid date format'}, status=400)
-
-    if interval == 'day':
-        start_date = selected_date
-        end_date = selected_date  # Start and end on the same day
-    elif interval == 'week':
-        start_date = selected_date
-        end_date = start_date + timedelta(days=6)
-    elif interval == 'month':
-        start_date = selected_date.replace(day=1)  # First day of the month
-        # Calculate the last day of the month
-        next_month = start_date.replace(day=28) + timedelta(days=4)
-        end_date = next_month.replace(day=1) - timedelta(days=1)
-    else:
-        return JsonResponse({'error': 'Invalid interval'}, status=400)
-
-    procedurebilling = ProcedureBill.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
-    serializer = ProcedureBillSerializer(procedurebilling, many=True)
-    return JsonResponse(serializer.data, safe=False)
 
 @api_view(['GET'])
 @csrf_exempt
@@ -582,11 +483,21 @@ def save_billing_data(request):
             date = data.get('appointmentDate')
             table_data = data.get('table_data')  # Ensure this is a valid JSON object
             netAmount = data.get('netAmount')
-            discount= data.get('discount')
+            discount = data.get('discount')
+            payment_type = data.get('paymentType')  # Cash or Card
+            section = data.get('section')  # Section: Pharmacy, Consumer, Procedure
+
             if not date:
                 return JsonResponse({'error': 'Date is required.'}, status=400)
-            # Log received data
-            print('Received data:', data)
+            
+            # Validate table_data as a JSON object
+            if isinstance(table_data, str):
+                table_data = json.loads(table_data)
+
+            # Generate the serial number based on payment type and section
+            bill_number = generate_serial_number(payment_type, section)
+            
+            # Create a new BillingData entry
             billing_data = BillingData(
                 patientUID=patientUID,
                 patientName=patientName,
@@ -594,12 +505,49 @@ def save_billing_data(request):
                 table_data=table_data,  # Store as JSON object, not string
                 netAmount=netAmount,
                 discount=discount,
+                paymentType=payment_type,
+                billNumber=bill_number
             )
             billing_data.save()
-            return JsonResponse({'success': 'Billing data successfully saved!'}, status=201)
+
+            return JsonResponse({'success': 'Billing data successfully saved!', 'serialNumber': bill_number}, status=201)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
     return JsonResponse({'error': 'Invalid request method.'}, status=405)
+
+def generate_serial_number(payment_type, section):
+        current_year = timezone.now().year  # Get the current year
+        prefix = ''
+        
+        if payment_type == 'Cash':
+            if section == 'Pharmacy':
+                prefix = 'CPhar'
+            elif section == 'Consumer':
+                prefix = 'CCosu'
+            elif section == 'Procedure':
+                prefix = 'CProc'
+        elif payment_type == 'Card':
+            if section == 'Pharmacy':
+                prefix = 'Phar'
+            elif section == 'Consumer':
+                prefix = 'Cosu'
+            elif section == 'Procedure':
+                prefix = 'Proc'
+
+        # Query the last serial number for the same type and section
+        last_bill = BillingData.objects.filter(paymentType=payment_type, billNumber__startswith=prefix).order_by('-id').first()
+        
+        if last_bill:
+            # Extract the last sequence number and increment it
+            last_serial = last_bill.billNumber.split('/')[-1]
+            new_sequence = int(last_serial) + 1
+        else:
+            # Start the sequence at 001 if no previous serial number is found
+            new_sequence = 1
+
+        # Format the serial number as per the pattern
+        bill_number = f"{prefix}/{current_year}/{new_sequence:03d}"
+        return bill_number
 
 
 @api_view(['PUT'])
@@ -656,6 +604,97 @@ def delete_billing_data(request):
     return JsonResponse({'message': 'Method not allowed'}, status=405)
 
 
+@api_view(['GET'])
+@csrf_exempt
+def get_summary_by_interval(request, interval):
+    date_str = request.GET.get('appointmentDate')
+    if not date_str:
+        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
+
+    try:
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    if interval == 'day':
+        start_date = selected_date
+        end_date = selected_date
+    elif interval == 'month':
+        start_date = selected_date.replace(day=1)
+        # Determine the end of the month
+        next_month = (start_date + timedelta(days=31)).replace(day=1)
+        end_date = next_month - timedelta(days=1)
+    else:
+        return JsonResponse({'error': 'Invalid interval'}, status=400)
+
+    summaries = SummaryDetail.objects.filter(appointmentDate__range=(start_date, end_date))
+    serializer = SummaryDetailSerializer(summaries, many=True)
+    return JsonResponse(serializer.data, safe=False)
+
+
+from .models import BillingData
+@api_view(['GET'])
+def get_billing_by_interval(request, interval):
+    date_str = request.GET.get('appointmentDate')
+    if not date_str:
+        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
+
+    try:
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    if interval == 'day':
+        start_date = selected_date
+        end_date = selected_date  # Start and end on the same day
+    elif interval == 'week':
+        start_date = selected_date
+        end_date = start_date + timedelta(days=6)
+    elif interval == 'month':
+        start_date = selected_date.replace(day=1)  # First day of the month
+        # Calculate the last day of the month
+        next_month = start_date.replace(day=28) + timedelta(days=4)
+        end_date = next_month.replace(day=1) - timedelta(days=1)
+    else:
+        return JsonResponse({'error': 'Invalid interval'}, status=400)
+
+    # Filter records from start_date to end_date
+    billing = BillingData.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
+    serializer = BillingDataSerializer(billing, many=True)
+    return JsonResponse({'billing_data': serializer.data}, safe=False)
+
+
+from .models import ProcedureBill
+from .serializers import ProcedureBillSerializer
+@api_view(['GET'])
+@csrf_exempt
+def get_procedurebilling_by_interval(request, interval):
+    date_str = request.GET.get('appointmentDate')
+    if not date_str:
+        return JsonResponse({'error': 'Date parameter is missing'}, status=400)
+
+    try:
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    if interval == 'day':
+        start_date = selected_date
+        end_date = selected_date  # Start and end on the same day
+    elif interval == 'week':
+        start_date = selected_date
+        end_date = start_date + timedelta(days=6)
+    elif interval == 'month':
+        start_date = selected_date.replace(day=1)  # First day of the month
+        # Calculate the last day of the month
+        next_month = start_date.replace(day=28) + timedelta(days=4)
+        end_date = next_month.replace(day=1) - timedelta(days=1)
+    else:
+        return JsonResponse({'error': 'Invalid interval'}, status=400)
+
+    procedurebilling = ProcedureBill.objects.filter(appointmentDate__gte=start_date, appointmentDate__lte=end_date)
+    serializer = ProcedureBillSerializer(procedurebilling, many=True)
+    return JsonResponse(serializer.data, safe=False)
 
 
 @require_GET
@@ -702,12 +741,47 @@ def get_procedures_bill(request):
 from .serializers import ProcedureBillSerializer
 @api_view(['POST'])
 def post_procedures_bill(request):
-    if request.method == 'POST':
-        serializer = ProcedureBillSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        data = json.loads(request.body)
+        patientUID = data.get('patientUID')
+        patientName = data.get('patientName')
+        appointmentDate = data.get('appointmentDate')
+        procedures = data.get('procedures')  # Ensure this is a valid JSON object
+        procedureNetAmount = data.get('procedureNetAmount')
+        consumerNetAmount = data.get('consumerNetAmount')
+        consumer = data.get('consumer')  # Ensure this is a valid JSON object
+
+        # Get payment types and sections for both bills
+        payment_type = data.get('PaymentType')
+
+        # Generate serial numbers for both consumer and procedure
+        consumer_bill_number = generate_serial_number(payment_type, 'Consumer')
+        procedure_bill_number = generate_serial_number(payment_type, 'Procedure')
+
+        # Validate the JSON fields
+        if isinstance(procedures, str):
+            procedures = json.loads(procedures)
+        if isinstance(consumer, str):
+            consumer = json.loads(consumer)
+
+        # Save the billing data
+        billing_data = ProcedureBill(
+            patientUID=patientUID,
+            patientName=patientName,
+            appointmentDate=appointmentDate,
+            procedures=procedures,
+            procedureNetAmount=procedureNetAmount,
+            consumerNetAmount=consumerNetAmount,
+            consumer=consumer,
+            consumerBillNumber=consumer_bill_number,
+            PaymentType=payment_type,
+            procedureBillNumber=procedure_bill_number,
+        )
+        billing_data.save()
+
+        return JsonResponse({'success': 'Billing data saved successfully!', 'consumerBillNumber': consumer_bill_number, 'procedureBillNumber': procedure_bill_number}, status=201)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
 
 
 @csrf_exempt
@@ -769,60 +843,4 @@ def get_file(request):
         return response
     else:
         # Return a 404 error if the file is not found
-        return HttpResponse(status=404)
-    
-
-client = MongoClient('mongodb+srv://smrftcosmo:smrft%402024@cluster0.lctyiq9.mongodb.net/your_database_name?retryWrites=true&w=majority')
-db = client['cosmetology']
-fs = GridFS(db)
-
-@csrf_exempt
-def upload_pdf(request):
-    if request.method == 'POST':
-        patient_name = request.POST.get('patient_name')
-        if 'pdf_files' in request.FILES:
-            pdf_files = request.FILES.getlist('pdf_files')
-            for index, pdf_file in enumerate(pdf_files):
-                pdf_filename = f'{patient_name}_{index}.pdf'
-                pdf_id = fs.put(pdf_file, filename=pdf_filename)
-                # You can store additional details in a separate collection if needed:
-                # db.fs.files.insert_one({
-                #     'pdf_id': str(pdf_id),
-                #     'patient_name': patient_name,
-                #     'file_name': pdf_filename,
-                # })
-            return HttpResponse('PDFs uploaded successfully')
-        return HttpResponseBadRequest('No PDF files provided')
-    return HttpResponseBadRequest('Invalid request method')
-
-
-@csrf_exempt
-def get_pdf_file(request):
-    """
-    View to retrieve a PDF file from MongoDB GridFS.
-    This view handles GET requests to retrieve a PDF file from MongoDB GridFS based on the provided filename.
-    Args:
-        request (HttpRequest): The HTTP request object containing the filename to retrieve.
-    Returns:
-        HttpResponse: An HTTP response containing the PDF file contents or a 404 error if the file is not found.
-    """
-    # Connect to MongoDB
-    client = MongoClient('mongodb+srv://smrftcosmo:smrft%402024@cluster0.lctyiq9.mongodb.net/your_database_name?retryWrites=true&w=majority')
-    db = client['cosmetology']
-    fs = GridFS(db)
-
-    # Get the filename from the request parameters
-    filename = request.GET.get('filename')
-
-    # Find the PDF file in MongoDB GridFS
-    file = fs.find_one({"filename": filename})
-
-    if file is not None:
-        # Return the PDF file contents as an HTTP response
-        response = HttpResponse(file.read())
-        response['Content-Type'] = 'application/pdf'
-        response['Content-Disposition'] = 'attachment; filename=%s' % file.filename
-        return response
-    else:
-        # Return a 404 error if the PDF file is not found
         return HttpResponse(status=404)
