@@ -41,8 +41,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'cosmetology',
-    'sslserver',
-    'django_extensions',
+
 ]
 
 REST_FRAMEWORK = {
