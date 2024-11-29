@@ -27,6 +27,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['52.66.22.14','195.250.21.70', 'shinovadatabase.in','cosmo-backend-msbf.onrender.com']
 
+SECURE_SSL_REDIRECT = False
 
 # Application definition
 
