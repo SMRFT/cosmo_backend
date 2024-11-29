@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-^++i9_0$54xip#wtj3c#4qt&p1q2)q=n8difm*gjwsl49dc1na
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['52.66.22.14','195.250.21.70', 'shinovadatabase.in','cosmo-backend-msbf.onrender.com']
+ALLOWED_HOSTS = ['52.66.22.14','195.250.21.70', 'shinovadatabase.in','cosmo-backend-msbf.onrender.com','api.shinovadatabase.in']
 
 SECURE_SSL_REDIRECT = False
 
@@ -142,7 +142,7 @@ STATIC_URL = '/static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000","http://localhost:3001",'https://salemcosmeticclinic.netlify.app','https://shinovadatabase.in'
+    "http://localhost:3000","http://localhost:3001",'https://salemcosmeticclinic.netlify.app','https://shinovadatabase.in','https://api.shinovadatabase.in'
 ]
 
 CORS_ALLOW_CREDENTIALS = True
