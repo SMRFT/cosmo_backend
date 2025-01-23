@@ -4,7 +4,6 @@ from datetime import timedelta,datetime
 from dateutil.parser import parse
 from django.db import models
 
-
 class Register(models.Model):
     id = models.CharField(max_length=500, primary_key=True)
     name = models.CharField(max_length=500)
@@ -13,24 +12,23 @@ class Register(models.Model):
     password = models.CharField(max_length=500)
     confirmPassword = models.CharField(max_length=500)
 
-
 class Login(models.Model):
     username = models.CharField(max_length=150)
     password = models.CharField(max_length=120)
 
 class Pharmacy(models.Model):
     medicine_name = models.CharField(max_length=255, unique=True)
-    company_name = models.CharField(max_length=255)
-    price = models.CharField(max_length=255)
-    CGST_percentage = models.CharField(max_length=200)
-    CGST_value = models.CharField(max_length=200)
-    SGST_percentage = models.CharField(max_length=200)
-    SGST_value = models.CharField(max_length=200)
-    new_stock = models.IntegerField()
+    company_name = models.CharField(max_length=255,null=True, blank=True)
+    price = models.CharField(max_length=255,null=True, blank=True)
+    CGST_percentage = models.CharField(max_length=200,null=True, blank=True)
+    CGST_value = models.CharField(max_length=200,null=True, blank=True)
+    SGST_percentage = models.CharField(max_length=200,null=True, blank=True)
+    SGST_value = models.CharField(max_length=200,null=True, blank=True)
+    new_stock = models.IntegerField(null=True, blank=True)
     old_stock = models.IntegerField(null=True, blank=True)
-    received_date = models.DateField()
-    expiry_date = models.DateField()
-    batch_number = models.CharField(max_length=255)
+    received_date = models.DateField(null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    batch_number = models.CharField(max_length=255,null=True, blank=True)
 
     def __str__(self):
         return self.medicine_name
@@ -42,12 +40,18 @@ class Pharmacy(models.Model):
         return self.old_stock <= 15
 
     def is_expiry_near(self):
-        if isinstance(self.expiry_date, str):
-            expiry_date = parse(self.expiry_date).date()
-        else:
-            expiry_date = self.expiry_date
+        try:
+            # Ensure `expiry_date` is a valid date
+            if isinstance(self.expiry_date, str):
+                expiry_date = parse(self.expiry_date).date()
+            else:
+                expiry_date = self.expiry_date
 
-        return (expiry_date - timezone.now().date()) <= timedelta(days=10)
+            # Check if expiry date is near
+            return (expiry_date - timezone.now().date()) <= timedelta(days=10)
+        except Exception as e:
+            # Handle invalid dates gracefully
+            return False
 
 class Patient(models.Model):
     patientName = models.CharField(max_length=255)  # Mandatory
@@ -87,25 +91,23 @@ class SummaryDetail(models.Model):
     patientName = models.CharField(max_length=100)
     patientUID = models.CharField(max_length=100)
     mobileNumber = models.CharField(max_length=100)
-    diagnosis = models.TextField(blank=True)
-    complaints = models.JSONField(blank=True)
-    findings = models.TextField(blank=True)
-    prescription = models.TextField(blank=True)
-    plans = models.TextField(blank=True)
-    tests = models.TextField(blank=True)
-    vital = models.JSONField(blank=True)
-    proceduresList = models.JSONField(blank=True)
-    nextVisit = models.TextField(blank=True)
-    appointmentDate = models.CharField(max_length=500)
+    diagnosis = models.CharField(max_length=1500,blank=True)
+    complaints = models.JSONField()
+    findings = models.CharField(max_length=1500,blank=True)
+    prescription = models.CharField(max_length=1500,blank=True)
+    plans = models.CharField(max_length=1500,blank=True)
+    tests = models.CharField(max_length=1500,blank=True)
+    vital = models.JSONField()
+    proceduresList = models.JSONField()
+    nextVisit = models.CharField(max_length=100,blank=True, null=True)
+    appointmentDate = models.CharField(max_length=100,blank=True)
     time = models.CharField(max_length=8, blank=True)
-
     def save(self, *args, **kwargs):
         # Set current Indian Standard Time (IST)
         tz = timezone.get_current_timezone()
         current_time = timezone.localtime(timezone.now(), tz).strftime('%H:%M:%S')
         self.time = current_time
         super().save(*args, **kwargs)
-
     def __str__(self):
         return self.diagnosis
 
