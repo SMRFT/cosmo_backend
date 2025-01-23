@@ -181,7 +181,6 @@ def check_medicine_status(request):
     return Response(response_data, status=status.HTTP_200_OK)
 
 
-
 from .serializers import PatientSerializer
 @api_view(['POST'])
 def Patients_data(request):
@@ -241,13 +240,16 @@ def AppointmentView(request):
         data = Appointment.objects.all()
         serializer = AppointmentSerializer(data, many=True)
         return Response(serializer.data)
-    
+
 
 from .models import SummaryDetail
 from .serializers import SummaryDetailSerializer
 from datetime import datetime
-@api_view(['POST', 'GET'])
+@api_view(['POST', 'GET', 'PATCH'])
 def SummaryDetailCreate(request):
+    client = MongoClient('mongodb+srv://smrftcosmo:smrft%402024@cluster0.lctyiq9.mongodb.net/your_database_name?retryWrites=true&w=majority')
+    db = client['cosmetology']
+    collection = db['cosmetology_summarydetail']
     if request.method == 'POST':
         try:
             serializer = SummaryDetailSerializer(data=request.data)
@@ -257,7 +259,7 @@ def SummaryDetailCreate(request):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     elif request.method == 'GET':
         try:
             date_str = request.GET.get('appointmentDate')
@@ -273,7 +275,67 @@ def SummaryDetailCreate(request):
         
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+
+    elif request.method == 'PATCH':
+        try:
+            date_str = request.data.get('appointmentDate')
+            patientUID = request.data.get('patientUID')
+
+            # Validate required fields
+            if not date_str or not patientUID:
+                return Response({'error': 'Both appointmentDate and patientUID are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+
+            # Query to find the existing document
+            query = {"appointmentDate": str(date), "patientUID": patientUID}
+            existing_document = collection.find_one(query)
+
+            if not existing_document:
+                return Response({'error': 'No matching summary data found'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Merge existing data with new data
+            updated_data = {**existing_document, **request.data}
+
+            # Safely append data for string fields without redundant commas
+            def append_field(existing_value, new_value):
+                if existing_value and new_value:
+                    # Only add a comma if there is a value in both the existing and new values
+                    if existing_value.endswith(","):
+                        return f"{existing_value.strip()}, {new_value.strip()}"
+                    return f"{existing_value.strip()}, {new_value.strip()}"
+                elif existing_value:
+                    return existing_value.strip()  # return the existing value if new value is empty
+                return new_value.strip() if new_value else ""  # return the new value if existing value is empty
+
+            if "diagnosis" in request.data:
+                updated_data["diagnosis"] = append_field(existing_document.get("diagnosis", ""), request.data["diagnosis"])
+
+            if "findings" in request.data:
+                updated_data["findings"] = append_field(existing_document.get("findings", ""), request.data["findings"])
+
+            if "prescription" in request.data:
+                updated_data["prescription"] = append_field(existing_document.get("prescription", ""), request.data["prescription"])
+
+            if "tests" in request.data:
+                updated_data["tests"] = append_field(existing_document.get("tests", ""), request.data["tests"])
+
+
+            updated_data.pop('_id', None)  # Remove '_id' to avoid conflicts during update
+
+            # Update the document
+            collection.update_one(query, {"$set": updated_data})
+
+            # Fetch the updated document
+            updated_document = collection.find_one(query)
+            updated_document['_id'] = str(updated_document['_id'])  # Convert ObjectId to string
+
+            return Response(updated_document, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 @api_view(['GET'])
 def PatientDetailsView(request):
@@ -297,28 +359,47 @@ def PatientDetailsView(request):
 @api_view(['GET'])
 def get_medicine_price(request):
     try:
+        # Fetch query parameters
         medicine_name = request.GET.get('medicine_name')
-        # Fetch the medicine details from your database
-        medicine = Pharmacy.objects.get(medicine_name=medicine_name)
-        # Prepare the response data
+        batch_number = request.GET.get('batch_number')
+
+        # Apply filters based on query parameters
+        medicines = Pharmacy.objects.all()
+
+        if medicine_name:
+            medicines = medicines.filter(medicine_name__icontains=medicine_name)
+        if batch_number:
+            medicines = medicines.filter(batch_number=batch_number)
+
+        # Exclude medicines with old_stock equal to 0
+        medicines = medicines.filter(old_stock__gt=0)
+
+        # Check if any medicines exist after filtering
+        if not medicines.exists():
+            return Response({'message': 'No medicines found matching the criteria or stock is empty'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get the medicine with the lowest old stock greater than 0
+        lowest_stock_medicine = medicines.order_by('old_stock').first()
+
+        # Serialize the response data
         response_data = {
-            'medicine_name': medicine.medicine_name,
-            'company_name': medicine.company_name,
-            'price': str(Decimal(medicine.price)),
-            'CGST_percentage': medicine.CGST_percentage,
-            'CGST_value': medicine.CGST_value,
-            'SGST_percentage': medicine.SGST_percentage,
-            'SGST_value': medicine.SGST_value,
-            'new_stock': medicine.new_stock,
-            'old_stock': medicine.old_stock,
-            'received_date': medicine.received_date,
-            'expiry_date': medicine.expiry_date,
-            'batch_number': medicine.batch_number,
+            'medicine_name': lowest_stock_medicine.medicine_name,
+            'company_name': lowest_stock_medicine.company_name,
+            'price': str(Decimal(lowest_stock_medicine.price)),
+            'CGST_percentage': lowest_stock_medicine.CGST_percentage,
+            'CGST_value': lowest_stock_medicine.CGST_value,
+            'SGST_percentage': lowest_stock_medicine.SGST_percentage,
+            'SGST_value': lowest_stock_medicine.SGST_value,
+            'new_stock': lowest_stock_medicine.new_stock,
+            'old_stock': lowest_stock_medicine.old_stock,
+            'received_date': lowest_stock_medicine.received_date,
+            'expiry_date': lowest_stock_medicine.expiry_date,
+            'batch_number': lowest_stock_medicine.batch_number,
         }
-        # Return JSON response
+
+        # Return response
         return Response(response_data, status=status.HTTP_200_OK)
-    except Pharmacy.DoesNotExist:
-        return Response({'error': f'Medicine "{medicine_name}" not found'}, status=status.HTTP_404_NOT_FOUND)
+
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -331,16 +412,18 @@ def check_upcoming_visits(request):
     filtered_visits = []
 
     for visit in upcoming_visits:
-        try:
-            next_visit_date = datetime.strptime(visit.nextVisit, '%d/%m/%Y').date()
-            if timezone.now().date() <= next_visit_date <= one_week_from_now:
-                filtered_visits.append({
-                    'patientUID': visit.patientUID,
-                    'patientName': visit.patientName,
-                    'nextVisit': visit.nextVisit
-                })
-        except ValueError:
-            continue
+        if visit.nextVisit:  # Ensure nextVisit is not None
+            try:
+                # Parse the next visit date
+                next_visit_date = datetime.strptime(visit.nextVisit, '%d/%m/%Y').date()
+                if timezone.now().date() <= next_visit_date <= one_week_from_now:
+                    filtered_visits.append({
+                        'patientUID': visit.patientUID,
+                        'patientName': visit.patientName,
+                        'nextVisit': visit.nextVisit
+                    })
+            except ValueError:
+                continue  # Skip if the date format is invalid
 
     data = {
         'upcoming_visits': filtered_visits
@@ -516,38 +599,87 @@ def save_billing_data(request):
     return JsonResponse({'error': 'Invalid request method.'}, status=405)
 
 def generate_serial_number(payment_type, section):
-        current_year = timezone.now().year  # Get the current year
-        prefix = ''
-        
-        if payment_type == 'Cash':
-            if section == 'Pharmacy':
-                prefix = 'CPhar'
-            elif section == 'Consumer':
-                prefix = 'CCosu'
-            elif section == 'Procedure':
-                prefix = 'CProc'
-        elif payment_type == 'Card':
-            if section == 'Pharmacy':
-                prefix = 'Phar'
-            elif section == 'Consumer':
-                prefix = 'Cosu'
-            elif section == 'Procedure':
-                prefix = 'Proc'
+    current_year = timezone.now().year  # Get the current year
+    prefix = ''
 
-        # Query the last serial number for the same type and section
-        last_bill = BillingData.objects.filter(paymentType=payment_type, billNumber__startswith=prefix).order_by('-id').first()
-        
-        if last_bill:
-            # Extract the last sequence number and increment it
-            last_serial = last_bill.billNumber.split('/')[-1]
-            new_sequence = int(last_serial) + 1
-        else:
-            # Start the sequence at 001 if no previous serial number is found
-            new_sequence = 1
+    # Define prefixes based on payment type and section
+    if payment_type == 'Cash':
+        if section == 'Pharmacy':
+            prefix = 'CPhar'
+        elif section == 'Consumer':
+            prefix = 'CCosu'
+        elif section == 'Procedure':
+            prefix = 'CProc'
+    elif payment_type == 'Card':
+        if section == 'Pharmacy':
+            prefix = 'Phar'
+        elif section == 'Consumer':
+            prefix = 'Cosu'
+        elif section == 'Procedure':
+            prefix = 'Proc'
 
-        # Format the serial number as per the pattern
-        bill_number = f"{prefix}/{current_year}/{new_sequence:03d}"
-        return bill_number
+    # Filter by prefix and current year to find the highest bill number in both models
+    last_bill_billingdata = BillingData.objects.filter(
+        billNumber__startswith=f"{prefix}/{current_year}/"
+    ).order_by('-billNumber').first()
+
+    if section == 'Consumer':
+        last_bill_procedurebill = ProcedureBill.objects.filter(
+            consumerBillNumber__startswith=f"{prefix}/{current_year}/"
+        ).order_by('-consumerBillNumber').first()
+    elif section == 'Procedure':
+        last_bill_procedurebill = ProcedureBill.objects.filter(
+            procedureBillNumber__startswith=f"{prefix}/{current_year}/"
+        ).order_by('-procedureBillNumber').first()
+    else:
+        last_bill_procedurebill = None  # Ensure no invalid query occurs
+
+    # Determine the highest sequence number between the two models
+    last_serial_billingdata = 0
+    last_serial_procedurebill = 0
+
+    if last_bill_billingdata:
+        try:
+            last_serial_billingdata = int(last_bill_billingdata.billNumber.split('/')[-1])
+        except ValueError:
+            last_serial_billingdata = 0
+
+    if last_bill_procedurebill:
+        try:
+            if section == 'Consumer':
+                last_serial_procedurebill = int(last_bill_procedurebill.consumerBillNumber.split('/')[-1])
+            elif section == 'Procedure':
+                last_serial_procedurebill = int(last_bill_procedurebill.procedureBillNumber.split('/')[-1])
+        except ValueError:
+            last_serial_procedurebill = 0
+
+    # Use the highest sequence number from both models
+    new_sequence = max(last_serial_billingdata, last_serial_procedurebill) + 1
+
+    # Format the serial number as per the desired pattern
+    bill_number = f"{prefix}/{current_year}/{new_sequence:03d}"
+    return bill_number
+
+@api_view(['GET'])
+def summary_get(request):
+    if request.method == 'GET':
+        try:
+            # Get parameters from the request
+            date_str = request.GET.get('appointmentDate')
+            patientUID = request.GET.get('patientUID')
+            # Validate parameters
+            if not date_str or not patientUID:
+                return Response({'error': 'Both appointmentDate and patientUID are required'}, status=status.HTTP_400_BAD_REQUEST)
+            # Convert date string to date object
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            # Filter records based on both appointmentDate and patientUID
+            summaries = SummaryDetail.objects.filter(appointmentDate=date, patientUID=patientUID)
+            # Serialize and return the data
+            serializer = SummaryDetailSerializer(summaries, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 @api_view(['PUT'])
@@ -589,19 +721,80 @@ def delete_billing_data(request):
     logger.info(f"Request method: {request.method}")
     if request.method == 'DELETE':
         try:
+            # Parse request body
             data = json.loads(request.body.decode('utf-8'))
-            record_id = data.get('record_id')  # Use a unique identifier
+            patient_uid = data.get('patientUID')  # Patient UID
+            bill_number = data.get('billNumber')  # Bill Number
 
-            if not record_id:
-                return JsonResponse({'message': 'Missing record_id'}, status=400)
+            # Validate input data
+            if not patient_uid or not bill_number:
+                return JsonResponse({'message': 'Missing patientUID or billNumber'}, status=400)
 
-            # Delete the specific record using the unique identifier
-            BillingData.objects.filter(patientUID=record_id).delete()
-            return JsonResponse({'message': 'Data deleted successfully'}, status=200)
+            # Delete the specific record using patientUID and billNumber
+            deleted_count, _ = BillingData.objects.filter(patientUID=patient_uid, billNumber=bill_number).delete()
+
+            if deleted_count > 0:
+                return JsonResponse({'message': 'Data deleted successfully'}, status=200)
+            else:
+                return JsonResponse({'message': 'No matching record found'}, status=404)
         except Exception as e:
             logger.error(f"Error occurred: {str(e)}")
             return JsonResponse({'message': str(e)}, status=400)
     return JsonResponse({'message': 'Method not allowed'}, status=405)
+
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+@require_http_methods(["DELETE"])
+@csrf_exempt
+def delete_procedure_data(request):
+    logger.info(f"Request method: {request.method}")
+    if request.method == 'DELETE':
+        try:
+            # Log the raw body
+            logger.info(f"Raw request body: {request.body}")
+
+            # Parse request body
+            data = json.loads(request.body.decode('utf-8'))
+            logger.info(f"Parsed request data: {data}")
+
+            patient_uid = data.get('patientUID')  # Patient UID
+            consumer_bill_number = data.get('consumerBillNumber')  # Consumer Bill Number
+            procedure_bill_number = data.get('procedureBillNumber')  # Procedure Bill Number
+
+            # Validate input data
+            if not patient_uid:
+                return JsonResponse({'message': 'Missing patientUID'}, status=400)
+            
+            if not consumer_bill_number and not procedure_bill_number:
+                return JsonResponse({'message': 'Either consumerBillNumber or procedureBillNumber must be provided'}, status=400)
+
+            # Build query for deletion
+            query = {'patientUID': patient_uid}
+
+            if consumer_bill_number:
+                query['consumerBillNumber'] = consumer_bill_number
+            
+            if procedure_bill_number:
+                query['procedureBillNumber'] = procedure_bill_number
+
+            # Log the query
+            logger.info(f"Query for deletion: {query}")
+
+            # Perform deletion
+            deleted_count, _ = ProcedureBill.objects.filter(**query).delete()
+
+            if deleted_count > 0:
+                return JsonResponse({'message': 'Data deleted successfully'}, status=200)
+            else:
+                return JsonResponse({'message': 'No matching record found'}, status=404)
+        except Exception as e:
+            logger.error(f"Error occurred: {str(e)}")
+            return JsonResponse({'message': str(e)}, status=400)
+    return JsonResponse({'message': 'Method not allowed'}, status=405)
+
 
 
 @api_view(['GET'])
@@ -697,6 +890,11 @@ def get_procedurebilling_by_interval(request, interval):
     return JsonResponse(serializer.data, safe=False)
 
 
+from django.http import JsonResponse
+from datetime import datetime
+from .models import SummaryDetail
+from django.views.decorators.http import require_GET
+
 @require_GET
 def get_procedures_bill(request):
     date_str = request.GET.get('appointmentDate')
@@ -710,6 +908,10 @@ def get_procedures_bill(request):
         detailed_records = {}
         # Iterate over all matching records and aggregate their details
         for detail in summary_details:
+            # Skip if proceduresList is empty or contains only whitespace
+            if not detail.proceduresList.strip():
+                continue
+
             procedures = detail.proceduresList.split('\n')
             patient_uid = detail.patientUID
             if patient_uid not in detailed_records:
@@ -736,6 +938,7 @@ def get_procedures_bill(request):
         return JsonResponse({'detailedRecords': response_data}, safe=False)
     except ValueError:
         return JsonResponse({'error': 'Invalid date format'}, status=400)
+
     
 
 from .serializers import ProcedureBillSerializer
@@ -788,7 +991,7 @@ def post_procedures_bill(request):
 def medical_history(request):
     if request.method == 'POST':
         data = json.loads(request.body)
-        patientUID = data.get('patientUID')
+        patientUID = data.get('id')
         if not patientUID:
             return JsonResponse({'error': 'Patient UID not provided'}, status=400)
         patient_details = SummaryDetail.objects.filter(patientUID=patientUID).values()
